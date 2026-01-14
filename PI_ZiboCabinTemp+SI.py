@@ -10,6 +10,9 @@ LICENSE file in the root directory of this source tree.
 """
 
 import json
+import urllib.request
+import urllib.parse
+import urllib.error
 
 from datetime import datetime, timedelta
 from time import perf_counter
@@ -24,7 +27,7 @@ except ImportError:
 
 
 # Version
-__VERSION__ = 'v2.1'
+__VERSION__ = 'v2.1+SI'
 
 
 # debug 
@@ -37,12 +40,14 @@ def debug(msg: str, tag: str = "DEBUG") -> None:
     if DEBUG:
         xp.log(f"[{tag}] {msg}")
 
-
+SI_URL = "https://apipri.sayintentions.ai/sapi/sayAs"
+SI_CHANNEL = "INTERCOM1_IN"
+SI_REPHRASE = False
 
 # Plugin parameters required from XPPython3
-plugin_name = 'ZiboCabinTemp'
-plugin_sig = 'xppython3.zibocabintemp'
-plugin_desc = 'Simple Python script to get a feedback about Zibo cabin temperature'
+plugin_name = 'ZiboCabinTempSI'
+plugin_sig = 'xppython3.zibocabintempsi'
+plugin_desc = 'Simple Python script to get a feedback about Zibo cabin temperature with SayIntentions AI support'
 
 # Other parameters
 DEFAULT_SCHEDULE = 10  # positive numbers are seconds, 0 disabled, negative numbers are cycles
@@ -53,10 +58,10 @@ DELTA_REQUEST = 4  # degrees C
 DELTA_LIMIT = 8  # degrees C
 
 # Aural messages
-VERY_HOT_MESSAGE = "it's really hot in the cabin"
-TOO_HOT_MESSAGE = "could we cool down the cabin a bit please?"
-TOO_COLD_MESSAGE = "passengers are asking for a cozier temperature"
-VERY_COLD_MESSAGE = "we are freezing in the cabin"
+VERY_HOT_MESSAGE = "it's really hot in the cabin!"
+TOO_HOT_MESSAGE = "could we cool down the cabin a bit?"
+TOO_COLD_MESSAGE = "passengers are asking for a cozier temperature?"
+VERY_COLD_MESSAGE = "we are freezing in the cabin!"
 
 # Aircrafts
 AIRCRAFTS = [
@@ -73,7 +78,7 @@ except NameError:
 
 LINE = FONT_HEIGHT + 4
 WIDTH = 280
-HEIGHT = 200
+HEIGHT = 300
 HEIGHT_MIN = 100
 MARGIN = 10
 HEADER = 12
@@ -96,6 +101,48 @@ def check_temperature(temp: float, comfort_temp: float) -> str:
     else:
         return ''
 
+def send_sayintentions_message(message: str, api_key: str, channel: str = SI_CHANNEL, rephrase: int = SI_REPHRASE) -> bool:
+    """Send message via SayIntentions API using urllib.request"""
+    try:
+        params = {
+            'api_key': api_key,
+            'channel': channel,
+            'message': message,
+            'rephrase': str(rephrase)
+        }
+        data = urllib.parse.urlencode(params).encode('utf-8')
+        full_url = f"{SI_URL}?{data.decode('utf-8')}"
+        
+        if DEBUG:
+          debug(f"SayIntentions API request: {full_url}", "SI_API")
+        else:
+          log(f"SI Message: {full_url}")
+        
+        req = urllib.request.Request(full_url)
+        with urllib.request.urlopen(req, timeout=5) as response:
+            response_status = response.getcode()
+            response_data = response.read().decode('utf-8')
+            
+        debug(f"SayIntentions API response: {response_status}", "SI_API")
+        
+        if '"error"' in response_data:
+            debug(f"API Error response: {response_data}", "SI_API")
+            return False
+            
+        return True
+        
+    except urllib.error.HTTPError as e:
+        debug(f"SayIntentions HTTP error: {e.code} {e.reason}", "SI_API")
+        if hasattr(e, 'read'):
+            error_data = e.read().decode('utf-8')
+            debug(f"Error response: {error_data}", "SI_API")
+        return False
+    except urllib.error.URLError as e:
+        debug(f"SayIntentions URL error: {str(e)}", "SI_API")
+        return False
+    except Exception as e:
+        debug(f"Unexpected error in SayIntentions: {str(e)}", "SI_API")
+        return False
 
 class Dref:
 
@@ -134,9 +181,12 @@ class PythonInterface:
 
         # app init
         self.latest_request_time = None
-        self.config_file = Path(self.prefs, 'zibocabintemp.prf')
+        self.config_file = Path(self.prefs, 'zibocabintempsi.prf')
         self.enabled = True
         self.comfort_temp = DEFAULT_COMFORT_TEMP
+        self.si_api_key = ''
+        self.si_channel = SI_CHANNEL
+        self.si_rephrase = SI_REPHRASE
         self.load_settings()
 
         # widget
@@ -295,6 +345,65 @@ class PythonInterface:
             left + 225, t, right, t - LINE,
             1, "set", 0, self.settings_widget, xp.WidgetClass_Button
         )
+        
+        t -= (LINE + MARGIN + 10)
+        cap = xp.createWidget(
+            left, t, left + 160, t - LINE,
+            1, 'SI OPTIONS', 0, self.settings_widget, xp.WidgetClass_Caption
+        )
+        xp.setWidgetProperty(cap, xp.Property_CaptionLit, 1)
+        
+        t -= (LINE + MARGIN)
+        cap = xp.createWidget(
+            left, t, left + 120, t - LINE,
+            1, 'API key:', 0, self.settings_widget, xp.WidgetClass_Caption
+        )
+        xp.setWidgetProperty(cap, xp.Property_CaptionLit, 1)
+        self.si_api_key_input = xp.createWidget(
+            left + 120, t, left + 210, t - LINE,
+            1, '', 0, self.settings_widget, xp.WidgetClass_TextField
+        )
+        xp.setWidgetProperty(self.si_api_key_input, xp.Property_MaxCharacters, 12)
+        xp.setWidgetProperty(self.si_api_key_input, xp.Property_TextFieldType, xp.TextTranslucent)
+        xp.setWidgetDescriptor(self.si_api_key_input, str(self.si_api_key))
+
+        self.si_api_key_button = xp.createWidget(
+            left + 225, t, right, t - LINE,
+            1, "set", 0, self.settings_widget, xp.WidgetClass_Button
+        )
+        
+        t -= (LINE + MARGIN)
+        cap = xp.createWidget(
+            left, t, left + 120, t - LINE,
+            1, 'channel:', 0, self.settings_widget, xp.WidgetClass_Caption
+        )
+        xp.setWidgetProperty(cap, xp.Property_CaptionLit, 1)
+        self.si_channel_input = xp.createWidget(
+            left + 120, t, left + 210, t - LINE,
+            1, '', 0, self.settings_widget, xp.WidgetClass_TextField
+        )
+        xp.setWidgetProperty(self.si_channel_input, xp.Property_MaxCharacters, 12)
+        xp.setWidgetProperty(self.si_channel_input, xp.Property_TextFieldType, xp.TextTranslucent)
+        xp.setWidgetDescriptor(self.si_channel_input, str(self.si_channel))
+
+        self.si_channel_button = xp.createWidget(
+            left + 225, t, right, t - LINE,
+            1, "set", 0, self.settings_widget, xp.WidgetClass_Button
+        )
+        
+        t -= (LINE + MARGIN)
+        cap = xp.createWidget(
+            left, t, left + 160, t - LINE,
+            1, 'rephrase:', 0, self.settings_widget, xp.WidgetClass_Caption
+        )
+        xp.setWidgetProperty(cap, xp.Property_CaptionLit, 1)
+        self.si_rephrase_input = xp.createWidget(
+            left + 225, t, right, t - LINE,
+            1, '', 0, self.settings_widget, xp.WidgetClass_Button
+        )
+        xp.setWidgetProperty(self.si_rephrase_input, xp.Property_ButtonState, xp.RadioButton)
+        xp.setWidgetProperty(self.si_rephrase_input, xp.Property_ButtonBehavior, xp.ButtonBehaviorCheckBox)
+        xp.setWidgetProperty(self.si_rephrase_input, xp.Property_ButtonState, self.si_rephrase)
 
         # Register our widget handler
         self.settingsWidgetHandlerCB = self.settingsWidgetHandler
@@ -333,6 +442,23 @@ class PythonInterface:
             self.enabled = bool(xp.getWidgetProperty(self.enable_check, xp.Property_ButtonState))
             return 1
 
+        if inMessage == xp.Msg_PushButtonPressed and inParam1 == self.si_api_key_button:
+           self.si_api_key = xp.getWidgetDescriptor(self.si_api_key_input).strip()
+           self.message = f"API Key: {'*' * len(self.si_api_key)}"
+           xp.loseKeyboardFocus(self.si_api_key_input)
+           return 1
+
+        if inMessage == xp.Msg_PushButtonPressed and inParam1 == self.si_channel_button:
+           self.si_channel = xp.getWidgetDescriptor(self.si_channel_input).strip() or SI_CHANNEL
+           self.message = f"Channel: {self.si_channel}"
+           xp.loseKeyboardFocus(self.si_channel_input)
+           return 1
+
+        if inMessage == xp.Msg_ButtonStateChanged and inParam1 == self.si_rephrase_input:
+           self.si_rephrase = bool(xp.getWidgetProperty(self.si_rephrase_input, xp.Property_ButtonState))
+           self.message = f"Rephrase: {'ON' if self.si_rephrase else 'OFF'}"
+           return 1
+
         return 0
 
     def load_settings(self) -> bool:
@@ -343,16 +469,28 @@ class PythonInterface:
             # parse file
             settings = json.loads(data)
             if settings:
-                self.enabled = settings.get('settings').get('enabled')
-                self.comfort_temp = settings.get('settings').get('comfort_temp')
-        else:
-            # keep default values
-            return False
+                self.enabled = settings.get('settings', {}).get('enabled', True)
+                self.comfort_temp = settings.get('settings', {}).get('comfort_temp', DEFAULT_COMFORT_TEMP)
+                self.si_api_key = settings.get('si', {}).get('api_key', '')
+                self.si_channel = settings.get('si', {}).get('channel', SI_CHANNEL)
+                self.si_rephrase = settings.get('si', {}).get('rephrase', True)
+                return True
+        return False
 
     def save_settings(self) -> None:
-        settings = {'settings': {'enabled': self.enabled, 'comfort_temp': self.comfort_temp}}
+        settings = {
+            'settings': {
+                'enabled': self.enabled, 
+                'comfort_temp': self.comfort_temp
+            },
+            'si': {
+                'api_key': self.si_api_key,
+                'channel': self.si_channel,
+                'rephrase': self.si_rephrase
+            }
+        }
         with open(self.config_file, 'w', encoding='utf-8') as f:
-            json.dump(settings, f)
+            json.dump(settings, f, indent=2)
 
     def loopCallback(self, lastCall, elapsedTime, counter, refCon) -> int:
         """Loop Callback"""
@@ -374,13 +512,13 @@ class PythonInterface:
                         comm = "we are starting boarding now"
                         if message:
                             comm += ". Please, make sure the cabin is conditioned"
-                            xp.speakString(f"Captain, {comm}")
+                            send_sayintentions_message(f"Captain, {comm}", self.si_api_key, self.si_channel, self.si_rephrase)
                 elif self.time_to_check:
                     self.latest_request_time = t
                     if message:
                         self.message = message
                         if self.enabled:
-                            xp.speakString(f"Captain, {message}")
+                            send_sayintentions_message(f"Captain, {message}", self.si_api_key, self.si_channel, self.si_rephrase)
             elif self.latest_request_time:
                 # reset for turnaround
                 self.latest_request_time = None
