@@ -112,25 +112,23 @@ def send_sayintentions_message(message: str, api_key: str, channel: str = SI_CHA
         }
         data = urllib.parse.urlencode(params).encode('utf-8')
         full_url = f"{SI_URL}?{data.decode('utf-8')}"
-        
+
         if DEBUG:
           debug(f"SayIntentions API request: {full_url}", "SI_API")
-        else:
-          log(f"SI Message: {full_url}")
-        
+
         req = urllib.request.Request(full_url)
         with urllib.request.urlopen(req, timeout=5) as response:
             response_status = response.getcode()
             response_data = response.read().decode('utf-8')
-            
+
         debug(f"SayIntentions API response: {response_status}", "SI_API")
-        
+
         if '"error"' in response_data:
             debug(f"API Error response: {response_data}", "SI_API")
             return False
-            
+
         return True
-        
+
     except urllib.error.HTTPError as e:
         debug(f"SayIntentions HTTP error: {e.code} {e.reason}", "SI_API")
         if hasattr(e, 'read'):
@@ -345,14 +343,14 @@ class PythonInterface:
             left + 225, t, right, t - LINE,
             1, "set", 0, self.settings_widget, xp.WidgetClass_Button
         )
-        
+
         t -= (LINE + MARGIN + 10)
         cap = xp.createWidget(
             left, t, left + 160, t - LINE,
             1, 'SI OPTIONS', 0, self.settings_widget, xp.WidgetClass_Caption
         )
         xp.setWidgetProperty(cap, xp.Property_CaptionLit, 1)
-        
+
         t -= (LINE + MARGIN)
         cap = xp.createWidget(
             left, t, left + 120, t - LINE,
@@ -371,7 +369,7 @@ class PythonInterface:
             left + 225, t, right, t - LINE,
             1, "set", 0, self.settings_widget, xp.WidgetClass_Button
         )
-        
+
         t -= (LINE + MARGIN)
         cap = xp.createWidget(
             left, t, left + 120, t - LINE,
@@ -390,7 +388,7 @@ class PythonInterface:
             left + 225, t, right, t - LINE,
             1, "set", 0, self.settings_widget, xp.WidgetClass_Button
         )
-        
+
         t -= (LINE + MARGIN)
         cap = xp.createWidget(
             left, t, left + 160, t - LINE,
